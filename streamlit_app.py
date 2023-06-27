@@ -398,3 +398,302 @@ if selected == "Search Queries":
     st_lottie(lottie_visualization)
 
 #-------------------------------------------------------END-----------------------------------------------------------#
+
+
+
+from pymongo import MongoClient
+
+client = MongoClient('mongodb://localhost:27017/')
+db = client['Youtube']
+collection = db['youtube_warehousing']
+
+from googleapiclient.discovery import build
+
+def youtube_api_request(api_key, channel_id):
+    youtube = build('youtube', 'v3', developerKey=api_key)
+
+    channel_request = youtube.channels().list(
+        part='snippet,statistics,contentDetails',
+        id=channel_id
+    )
+    channel_response = channel_request.execute()
+    channel = channel_response['items'][0]
+
+    channel_obj = {
+        "Channel_Name": channel['snippet']['title'],
+        "Channel_Id": channel_id,
+        "Subscription_Count": int(channel['statistics']['subscriberCount']),
+        "Channel_Views": int(channel['statistics']['viewCount']),
+        "Channel_Description": channel['snippet']['description'],
+        "Playlist_Id": channel.get('contentDetails', {}).get('relatedPlaylists', {}).get('uploads', '')
+    }
+
+    video_request = youtube.search().list(
+        part='snippet',
+        channelId=channel_id,
+        maxResults=5  
+    )
+    video_response = video_request.execute()
+    videos = video_response['items']
+
+    response = {
+        "Channel_Name": channel_obj
+    }
+
+    for video in videos:
+        video_id = video['id']['videoId']
+        video_details_request = youtube.videos().list(
+            part='snippet,statistics,contentDetails',
+            id=video_id
+        )
+        video_details_response = video_details_request.execute()
+        video_details = video_details_response['items'][0]
+
+        video_obj = {
+            "Video_Id": video_id,
+            "Video_Name": video_details['snippet']['title'],
+            "Video_Description": video_details['snippet']['description'],
+            "Tags": video_details['snippet'].get('tags', []),
+            "PublishedAt": video_details['snippet']['publishedAt'],
+            "View_Count": int(video_details['statistics']['viewCount']),
+            "Like_Count": int(video_details['statistics'].get('likeCount', 0)),
+            "Dislike_Count": int(video_details['statistics'].get('dislikeCount', 0)),
+            "Favorite_Count": int(video_details['statistics'].get('favoriteCount', 0)),
+            "Comment_Count": int(video_details['statistics'].get('commentCount', 0)),
+            "Duration": video_details['contentDetails'].get('duration', 'N/A'),
+            "Thumbnail": video_details['snippet']['thumbnails']['default']['url'],
+            "Caption_Status": video_details['contentDetails'].get('caption', 'N/A'),
+            "Comments": {}
+        }
+
+        comments_request = youtube.commentThreads().list(
+            part='snippet',
+            videoId=video_id,
+            maxResults=5  
+        )
+        comments_response = comments_request.execute()
+        comments = comments_response['items']
+
+        for i, comment in enumerate(comments):
+            comment_obj = {
+                "Comment_Id": comment['id'],
+                "Comment_Text": comment['snippet']['topLevelComment']['snippet']['textDisplay'],
+                "Comment_Author": comment['snippet']['topLevelComment']['snippet']['authorDisplayName'],
+                "Comment_PublishedAt": comment['snippet']['topLevelComment']['snippet']['publishedAt']
+            }
+            video_obj['Comments']['Comment_Id_' + str(i+1)] = comment_obj
+
+        response["Video_Id_" + str(len(response) - 1)] = video_obj
+
+    return response
+
+api_key = 'AIzaSyDvtX9sU9nfSoW5BG2_xgzPvFO-5Ih6a8I'
+channel_id = 'UCYC6Vcczj8v-Y5OgpEJTFBw'
+response = youtube_api_request(api_key, channel_id)
+
+import mysql.connector
+
+mydb = mysql.connector.connect(host="localhost", user="root", password="@jaykumar_A04", database="youtube_sql")
+
+cursor = mydb.cursor()
+
+import pymysql
+
+def create_mysql_tables(mysql_host, mysql_user, mysql_password, mysql_database):
+    
+    mysql_conn = pymysql.connect(host=mysql_host, user=mysql_user, password=mysql_password, database=mysql_database)
+
+    with mysql_conn.cursor() as cursor:
+        create_channel_table_sql = """
+        CREATE TABLE IF NOT EXISTS channel_table (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            Channel_Name VARCHAR(255),
+            Channel_Id VARCHAR(255),
+            Subscription_Count INT,
+            Channel_Views BIGINT,
+            Channel_Description TEXT,
+            Playlist_Id VARCHAR(255)
+        )
+        """
+        cursor.execute(create_channel_table_sql)
+
+    with mysql_conn.cursor() as cursor:
+        create_video_table_sql = """
+        CREATE TABLE IF NOT EXISTS video_table (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            Channel_Name VARCHAR(255),
+            Channel_Id VARCHAR(255),
+            Video_Id VARCHAR(255),
+            Video_Name VARCHAR(255),
+            Video_Description TEXT,
+            PublishedAt DATETIME,
+            View_Count INT,
+            Like_Count INT,
+            Dislike_Count INT,
+            Favorite_Count INT,
+            Comment_Count INT,
+            Duration VARCHAR(255),
+            Thumbnail VARCHAR(255),
+            Caption_Status VARCHAR(255)
+        )
+        """
+        cursor.execute(create_video_table_sql)
+        
+    with mysql_conn.cursor() as cursor:
+        create_comment_table_sql = """
+        CREATE TABLE IF NOT EXISTS comment_table (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            Channel_Name VARCHAR(255),
+            Channel_Id VARCHAR(255),
+            Comment_Id VARCHAR(255),
+            Comment_Text TEXT,
+            Comment_Author VARCHAR(255),
+            Comment_PublishedAt DATETIME,
+            Video_Id VARCHAR(255)
+        )
+        """
+        cursor.execute(create_comment_table_sql)
+
+    mysql_conn.commit()
+    mysql_conn.close()
+
+mysql_host = 'localhost'
+mysql_user = 'root'
+mysql_password = 'ajaykumar_A04'
+mysql_database = 'youtube_sql'
+
+create_mysql_tables(mysql_host, mysql_user, mysql_password, mysql_database)
+
+import pymongo
+import pymysql
+from datetime import datetime
+
+def convert_iso8601_to_mysql_datetime(iso8601_datetime):
+    # Convert ISO 8601 datetime to MySQL datetime format
+    dt = datetime.strptime(iso8601_datetime, '%Y-%m-%dT%H:%M:%SZ')
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+def migrate_data_from_mongodb_to_mysql(mongo_uri, mongodb_database, mongodb_collection,
+                                      mysql_host, mysql_user, mysql_password, mysql_database):
+    # Connect to MongoDB
+    mongo_client = pymongo.MongoClient(mongo_uri)
+    mongo_db = mongo_client[mongodb_database]
+    mongo_collection = mongo_db[mongodb_collection]
+
+    mysql_conn = pymysql.connect(host=mysql_host, user=mysql_user, password=mysql_password, database=mysql_database)
+
+    data = list(mongo_collection.find())
+    
+    for channel_data in data:
+        channel_name = channel_data.get('Channel_Name', {}).get('Channel_Name', '')
+        channel_id = channel_data.get('Channel_Name', {}).get('Channel_Id', " ")
+        subscription_count = channel_data.get('Channel_Name', {}).get('Subscription_Count', 0)
+        channel_views = channel_data.get('Channel_Name', {}).get('Channel_Views', 0)
+        channel_description = channel_data.get('Channel_Name', {}).get('Channel_Description', "")
+        playlist_id = channel_data.get('Channel_Name', {}).get('Playlist_Id', '')
+
+        with mysql_conn.cursor() as cursor:
+            sql = "INSERT INTO channel_table (Channel_Name, Channel_Id, Subscription_Count, Channel_Views, Channel_Description, Playlist_Id) VALUES (%s, %s, %s, %s, %s, %s)"
+            values = (channel_name, channel_id, subscription_count, channel_views, channel_description, playlist_id)
+            cursor.execute(sql, values)
+        mysql_conn.commit()
+    
+    
+    for video_data in data:
+        channel_name = video_data.get('Channel_Name', {}).get('Channel_Name', '')
+        channel_id = video_data.get('Channel_Name', {}).get('Channel_Id', " ")
+        video_id = video_data.get('Video_Id_0', {}).get('Video_Id', '')
+        video_name = video_data.get('Video_Id_0', {}).get('Video_Name', '')
+        video_description = video_data.get('Video_Id_0', {}).get('Video_Description', '')
+        published_at = video_data.get('Video_Id_0', {}).get('PublishedAt', '')
+        view_count = video_data.get('Video_Id_0', {}).get('View_Count', 0)
+        like_count = video_data.get('Video_Id_0', {}).get('Like_Count', 0)
+        dislike_count = video_data.get('Video_Id_0', {}).get('Dislike_Count', 0)
+        favorite_count = video_data.get('Video_Id_0', {}).get('Favorite_Count', 0)
+        comment_count = video_data.get('Video_Id_0', {}).get('Comment_Count', 0)
+        duration = video_data.get('Video_Id_0', {}).get('Duration', '')
+        thumbnail = video_data.get('Video_Id_0', {}).get('Thumbnail', '')
+        caption_status = video_data.get('Video_Id_0', {}).get('Caption_Status', '')
+
+        published_at = convert_iso8601_to_mysql_datetime(published_at)
+        
+        with mysql_conn.cursor() as cursor:
+            sql = "INSERT INTO video_table (Channel_Name, Channel_Id, Video_Id, Video_Name, Video_Description, PublishedAt, View_Count, Like_Count, Dislike_Count, Favorite_Count, Comment_Count, Duration, Thumbnail, Caption_Status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            values = (channel_name, channel_id, video_id, video_name, video_description, published_at, view_count, like_count, dislike_count, favorite_count, comment_count, duration, thumbnail, caption_status)
+            cursor.execute(sql, values)
+        mysql_conn.commit()
+                
+    mongo_client.close()
+    mysql_conn.close()
+
+mongo_uri = 'mongodb://localhost:27017'
+mongodb_database = 'Youtube'
+mongodb_collection = 'youtube_warehousing'
+mysql_host = 'localhost'
+mysql_user = 'root'
+mysql_password = 'ajaykumar_A04'
+mysql_database = 'youtube_sql'
+
+migrate_data_from_mongodb_to_mysql(mongo_uri, mongodb_database, mongodb_collection,
+                                  mysql_host, mysql_user, mysql_password, mysql_database)
+
+
+import pymongo
+import pymysql
+from datetime import datetime
+
+def convert_iso8601_to_mysql_datetime(iso8601_datetime):
+    if iso8601_datetime:
+        try:
+            dt = datetime.strptime(iso8601_datetime, '%Y-%m-%dT%H:%M:%SZ')
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            return None
+    else:
+        return None
+
+def migrate_comments_from_mongodb_to_mysql(mongo_uri, mongodb_database, mongodb_collection,
+                                          mysql_host, mysql_user, mysql_password, mysql_database):
+    
+    mongo_client = pymongo.MongoClient(mongo_uri)
+    mongo_db = mongo_client[mongodb_database]
+    mongo_collection = mongo_db[mongodb_collection]
+
+    mysql_conn = pymysql.connect(host=mysql_host, user=mysql_user, password=mysql_password, database=mysql_database)
+
+    data = list(mongo_collection.find())
+
+    for video_data in data:
+        channel_name = video_data.get('Channel_Name', {}).get('Channel_Name', '')
+        channel_id = video_data.get('Channel_Name', {}).get('Channel_Id', '')
+
+        video_id = video_data.get('Video_Id_0', {}).get('Video_Id', '')
+
+        comments = video_data.get('Video_Id_0', {}).get('Comments', {})
+        if comments:
+            for comment_id, comment_data in comments.items():
+                comment_text = comment_data.get('Comment_Text', '')
+                comment_author = comment_data.get('Comment_Author', '')
+                comment_published_at = comment_data.get('Comment_PublishedAt', '')
+
+                comment_published_at = convert_iso8601_to_mysql_datetime(comment_published_at)
+
+                with mysql_conn.cursor() as cursor:
+                    sql = "INSERT INTO comment_table (Channel_Name, Channel_Id, Comment_Id, Comment_Text, Comment_Author, Comment_PublishedAt, Video_Id) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                    values = (channel_name, channel_id, comment_id, comment_text, comment_author, comment_published_at, video_id)
+                    cursor.execute(sql, values)
+                mysql_conn.commit()
+
+    mongo_client.close()
+    mysql_conn.close()
+
+mongo_uri = 'mongodb://localhost:27017'
+mongodb_database = 'Youtube'
+mongodb_collection = 'youtube_warehousing'
+mysql_host = 'localhost'
+mysql_user = 'root'
+mysql_password = 'ajaykumar_A04'
+mysql_database = 'youtube_sql'
+
+migrate_comments_from_mongodb_to_mysql(mongo_uri, mongodb_database, mongodb_collection,
+                                       mysql_host, mysql_user, mysql_password, mysql_database)
