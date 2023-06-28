@@ -1,4 +1,4 @@
-# YouTube Data Analysis Dashboard
+# YouTube Data Harvesting and Warehousing
 
 This repository contains a Streamlit application for analyzing YouTube data. The application allows users to explore and visualize data related to YouTube channels, videos, and comments. It provides insights into user behavior, content performance, and audience preferences on the platform.
 
