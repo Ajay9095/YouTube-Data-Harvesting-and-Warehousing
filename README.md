@@ -70,7 +70,3 @@ The application provides the following functionality:
 - Executes predefined SQL queries to retrieve data from the MySQL database.
 - Displays the retrieved data in DataFrame format.
 - Provides data visualizations based on the retrieved data.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
