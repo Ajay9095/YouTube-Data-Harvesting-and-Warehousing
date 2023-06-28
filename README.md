@@ -2,6 +2,9 @@
 
 This repository contains a Streamlit application for analyzing YouTube data. The application allows users to explore and visualize data related to YouTube channels, videos, and comments. It provides insights into user behavior, content performance, and audience preferences on the platform.
 
+# Deployment of "Streamlit app" using Visual Studio Code.
+https://github.com/Ajay9095/YouTube-Data-Harvesting-and-Warehousing/assets/122981534/59b28934-16f9-43b2-a214-3a6964d45510
+
 ## Dependencies
 
 The following dependencies are required to run the application:
